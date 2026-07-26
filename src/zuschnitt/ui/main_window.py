@@ -343,7 +343,12 @@ class MainWindow(QMainWindow):
         if not (p.sheet_layouts or p.bar_layouts):
             QMessageBox.information(self, "Export", "Run optimization first.")
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Export PDF", "", "PDF files (*.pdf)")
+        default_dir = str(self._current_path.parent) if self._current_path else ""
+        default_name = p.name if p.name and p.name != "Untitled" else "cutting_plan"
+        default_path = str(Path(default_dir) / f"{default_name}.pdf") if default_dir else f"{default_name}.pdf"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export PDF", default_path, "PDF files (*.pdf)"
+        )
         if path:
             if not path.endswith(".pdf"):
                 path += ".pdf"
@@ -359,7 +364,10 @@ class MainWindow(QMainWindow):
         if not (p.sheet_layouts or p.bar_layouts):
             QMessageBox.information(self, "Export", "Run optimization first.")
             return
-        folder = QFileDialog.getExistingDirectory(self, "Export SVG – select folder")
+        default_dir = str(self._current_path.parent) if self._current_path else ""
+        folder = QFileDialog.getExistingDirectory(
+            self, "Export SVG – select output folder", default_dir
+        )
         if folder:
             try:
                 export_svg(p, Path(folder))

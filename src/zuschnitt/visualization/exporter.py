@@ -205,14 +205,17 @@ def _bar_to_svg(layout: BarLayout, unit: str = "mm") -> str:
 def export_svg(project: Project, folder: Path) -> None:
     folder.mkdir(parents=True, exist_ok=True)
     unit = project.settings.unit
+    base = project.name or "cutting_plan"
+    # Strip characters unsafe for filenames
+    safe = "".join(c if c.isalnum() or c in "-_ " else "_" for c in base).strip()
     if project.mode == "2d":
         for i, layout in enumerate(project.sheet_layouts):
             svg = _sheet_to_svg(layout, unit)
-            (folder / f"sheet_{i+1:02d}.svg").write_text(svg, encoding="utf-8")
+            (folder / f"{safe}_sheet_{i+1:02d}.svg").write_text(svg, encoding="utf-8")
     else:
         for i, layout in enumerate(project.bar_layouts):
             svg = _bar_to_svg(layout, unit)
-            (folder / f"bar_{i+1:02d}.svg").write_text(svg, encoding="utf-8")
+            (folder / f"{safe}_bar_{i+1:02d}.svg").write_text(svg, encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
