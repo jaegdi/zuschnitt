@@ -78,6 +78,11 @@ fun ZuschnittApp(appState: AppState) {
         ActivityResultContracts.CreateDocument("application/json")
     ) { uri ->
         if (uri != null) {
+            // Persist write + read permission so Save can reuse the URI later
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
             scope.launch(Dispatchers.IO) {
                 try {
                     context.contentResolver.openOutputStream(uri)?.use {
@@ -100,6 +105,11 @@ fun ZuschnittApp(appState: AppState) {
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
+            // Persist read + write permission so the URI survives app restart
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
             scope.launch(Dispatchers.IO) {
                 try {
                     val json = context.contentResolver.openInputStream(uri)
@@ -175,11 +185,16 @@ fun ZuschnittApp(appState: AppState) {
                     Column {
                         appState.recentFiles.forEach { path ->
                             val name = path.substringAfterLast('/').substringAfterLast('%')
+                                .let { Uri.decode(it) }
+                                .removeSuffix(".zusc").removeSuffix(".json")
                             TextButton(onClick = {
                                 showRecentMenu = false
                                 scope.launch(Dispatchers.IO) {
                                     try {
                                         val uri = Uri.parse(path)
+                                        // Use openInputStream directly — persistent permission
+                                        // was granted by takePersistableUriPermission() when
+                                        // the file was first opened or saved.
                                         val json = context.contentResolver.openInputStream(uri)
                                             ?.bufferedReader()?.readText() ?: ""
                                         withContext(Dispatchers.Main) {
@@ -189,13 +204,19 @@ fun ZuschnittApp(appState: AppState) {
                                             lastLayouts = emptyList()
                                             statusMessage = "Opened."
                                         }
+                                    } catch (e: SecurityException) {
+                                        // Persistent permission expired (file moved/deleted)
+                                        withContext(Dispatchers.Main) {
+                                            appState.removeRecent(path)
+                                            statusMessage = "File no longer accessible. Use Open… to re-select it."
+                                        }
                                     } catch (e: Exception) {
                                         withContext(Dispatchers.Main) {
                                             statusMessage = "Open failed: ${e.message}"
                                         }
                                     }
                                 }
-                            }) { Text(name) }
+                            }) { Text(name.ifBlank { path }) }
                         }
                     }
                 }

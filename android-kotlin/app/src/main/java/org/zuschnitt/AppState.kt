@@ -63,6 +63,14 @@ class AppState(context: Context) {
             .apply()
     }
 
+    fun removeRecent(path: String) {
+        val updated = recentFiles.filter { it != path }
+        recentFiles = updated
+        prefs.edit()
+            .putString("recent_files", JSONArray(updated).toString())
+            .apply()
+    }
+
     // ── Serialisation (.zusc JSON) ────────────────────────────────────────
 
     fun toJson(): String {
