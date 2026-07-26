@@ -102,6 +102,20 @@ class MainWindow(QMainWindow):
         self._optimize_btn.clicked.connect(self._optimize)
         tb.addWidget(self._optimize_btn)
 
+        tb.addSeparator()
+
+        self._pdf_btn = QPushButton("⬇  Export PDF")
+        self._pdf_btn.setFixedHeight(28)
+        self._pdf_btn.setToolTip("Export cutting plan as PDF")
+        self._pdf_btn.clicked.connect(self._export_pdf)
+        tb.addWidget(self._pdf_btn)
+
+        self._svg_btn = QPushButton("⬇  Export SVG")
+        self._svg_btn.setFixedHeight(28)
+        self._svg_btn.setToolTip("Export cutting plan as SVG")
+        self._svg_btn.clicked.connect(self._export_svg)
+        tb.addWidget(self._svg_btn)
+
     def _build_central(self):
         central = QWidget()
         self.setCentralWidget(central)
