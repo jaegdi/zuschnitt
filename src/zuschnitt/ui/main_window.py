@@ -215,7 +215,10 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _get_recent(self) -> list[str]:
-        return self._qsettings.value("recentFiles", []) or []
+        val = self._qsettings.value("recentFiles", [])
+        if isinstance(val, str):
+            val = [val] if val else []
+        return list(val) if val else []
 
     def _add_to_recent(self, path: Path) -> None:
         files = self._get_recent()
