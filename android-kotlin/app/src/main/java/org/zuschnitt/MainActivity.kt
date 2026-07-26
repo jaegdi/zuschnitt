@@ -26,7 +26,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.chaquo.python.PyObject
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import kotlinx.coroutines.Dispatchers
@@ -503,19 +502,38 @@ fun runOptimizer(
         val py = Python.getInstance()
         val bridge = py.getModule("zuschnitt.android_bridge")
 
-        val pySheets = sheets.map { mapOf("width" to it.width, "height" to it.height, "quantity" to it.quantity) }
-        val pyPieces = pieces.map { mapOf("width" to it.width, "height" to it.height, "quantity" to it.quantity) }
+        // Pass data as JSON strings — Chaquopy does not auto-convert
+        // Kotlin List<Map<String, Any>> to Python dicts reliably.
+        val sheetsJson = org.json.JSONArray().also { arr ->
+            sheets.forEach { s ->
+                arr.put(org.json.JSONObject()
+                    .put("width", s.width.toDouble())
+                    .put("height", s.height.toDouble())
+                    .put("quantity", s.quantity))
+            }
+        }.toString()
+        val piecesJson = org.json.JSONArray().also { arr ->
+            pieces.forEach { p ->
+                arr.put(org.json.JSONObject()
+                    .put("width", p.width.toDouble())
+                    .put("height", p.height.toDouble())
+                    .put("quantity", p.quantity))
+            }
+        }.toString()
 
-        val result = bridge.callAttr("optimize_simple", pySheets, pyPieces, kerf).asMap()
-        val success = result[PyObject.fromJava("success")]?.toBoolean() ?: false
-        val layoutCount = result[PyObject.fromJava("layouts_count")]?.toInt() ?: 0
-        val unplaced = result[PyObject.fromJava("unplaced_count")]?.toInt() ?: 0
+        val resultJson = bridge.callAttr("optimize_simple_json", sheetsJson, piecesJson, kerf)
+            .toString()
 
-        // Parse layout details for export
-        val layouts = parseLayouts(result)
+        val json = org.json.JSONObject(resultJson)
+        val success = json.optBoolean("success", false)
+        val layoutCount = json.optInt("layouts_count", 0)
+        val unplaced = json.optInt("unplaced_count", 0)
+        val layouts = parseLayoutsJson(json)
 
         val msg = if (success)
             "✅ $layoutCount sheet(s) used — all pieces placed."
+        else if (layoutCount == 0 && unplaced == 0)
+            "⚠️ No sheets or pieces provided."
         else
             "⚠️ $layoutCount sheet(s) used — $unplaced piece(s) could not be placed."
 
@@ -525,28 +543,29 @@ fun runOptimizer(
     }
 }
 
-private fun parseLayouts(result: Map<PyObject, PyObject>): List<SheetResult> {
+private fun parseLayoutsJson(json: org.json.JSONObject): List<SheetResult> {
     return try {
-        val layoutsObj = result[PyObject.fromJava("layouts")] ?: return emptyList()
-        layoutsObj.asList().mapIndexed { sheetIdx, layoutObj ->
-            val lm = layoutObj.asMap()
-            val sheetW = lm[PyObject.fromJava("sheet_width")]?.toFloat() ?: 0f
-            val sheetH = lm[PyObject.fromJava("sheet_height")]?.toFloat() ?: 0f
-            val efficiency = lm[PyObject.fromJava("efficiency")]?.toFloat() ?: 0f
-            val placementsObj = lm[PyObject.fromJava("placements")]
-            val placed = placementsObj?.asList()?.mapIndexed { i, p ->
-                val pm = p.asMap()
-                PlacedRect(
-                    x = pm[PyObject.fromJava("x")]?.toFloat() ?: 0f,
-                    y = pm[PyObject.fromJava("y")]?.toFloat() ?: 0f,
-                    w = pm[PyObject.fromJava("placed_width")]?.toFloat() ?: 0f,
-                    h = pm[PyObject.fromJava("placed_height")]?.toFloat() ?: 0f,
-                    label = pm[PyObject.fromJava("label")]?.toString() ?: "P${i + 1}",
-                    color = paletteColor(i),
-                )
-            } ?: emptyList()
+        val arr = json.optJSONArray("layouts") ?: return emptyList()
+        (0 until arr.length()).map { i ->
+            val lm = arr.getJSONObject(i)
+            val sheetW = lm.getDouble("sheet_width").toFloat()
+            val sheetH = lm.getDouble("sheet_height").toFloat()
+            val efficiency = lm.getDouble("efficiency").toFloat()
+            val placements = lm.optJSONArray("placements")
+            val placed = if (placements != null) {
+                (0 until placements.length()).mapIndexed { pi, _ ->
+                    val pm = placements.getJSONObject(pi)
+                    PlacedRect(
+                        x = pm.getDouble("x").toFloat(),
+                        y = pm.getDouble("y").toFloat(),
+                        w = pm.getDouble("placed_width").toFloat(),
+                        h = pm.getDouble("placed_height").toFloat(),
+                        label = pm.optString("label", ""),
+                        color = paletteColor(pi),
+                    )
+                }
+            } else emptyList()
             SheetResult(sheetW, sheetH, placed, efficiency)
         }
     } catch (_: Exception) { emptyList() }
 }
-

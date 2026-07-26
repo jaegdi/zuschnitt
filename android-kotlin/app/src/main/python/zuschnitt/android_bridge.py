@@ -2,23 +2,31 @@
 Bridge for calling the Zuschnitt optimizer from Kotlin/Android via Chaquopy.
 """
 
-from zuschnitt.models import StockSheet, Piece2D, Settings
+import json
+
+from zuschnitt.models import StockSheet, Piece2D
 from zuschnitt.optimizer_2d import optimize_2d
 
 
-def optimize_simple(sheets_data, pieces_data, kerf=3.0):
+def optimize_simple_json(sheets_json: str, pieces_json: str, kerf: float = 3.0) -> str:
     """
-    Simplified optimizer entry point for Android.
+    JSON-in / JSON-out entry point called by Kotlin via Chaquopy.
+
+    Using JSON strings avoids Chaquopy's unreliable auto-conversion of
+    Kotlin List<Map<String,Any>> to Python dicts.
 
     Args:
-        sheets_data: list of dicts with 'width', 'height', 'quantity' keys
-        pieces_data: list of dicts with 'width', 'height', 'quantity' keys
-        kerf: cut width in mm (default: 3.0)
+        sheets_json: JSON array string, e.g. '[{"width":2440,"height":1220,"quantity":1}]'
+        pieces_json: JSON array string, e.g. '[{"width":400,"height":300,"quantity":2}]'
+        kerf: cut width in mm
 
     Returns:
-        dict with 'success', 'layouts_count', 'unplaced_count', 'layouts' keys
+        JSON string with keys: success, layouts_count, unplaced_count, total_waste, layouts
     """
     try:
+        sheets_data = json.loads(sheets_json)
+        pieces_data = json.loads(pieces_json)
+
         sheets = [
             StockSheet(
                 width=float(s["width"]),
@@ -38,10 +46,10 @@ def optimize_simple(sheets_data, pieces_data, kerf=3.0):
             for p in pieces_data
         ]
 
-        layouts, unplaced = optimize_2d(sheets, pieces, kerf=kerf)
+        layouts, unplaced = optimize_2d(sheets, pieces, kerf=float(kerf))
 
         result = {
-            "success": len(unplaced) == 0,
+            "success": len(unplaced) == 0 and len(pieces) > 0,
             "layouts_count": len(layouts),
             "unplaced_count": len(unplaced),
             "total_waste": 0.0,
@@ -71,7 +79,9 @@ def optimize_simple(sheets_data, pieces_data, kerf=3.0):
                 ],
             })
 
-        return result
+        return json.dumps(result)
 
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return json.dumps({"success": False, "error": str(e),
+                           "layouts_count": 0, "unplaced_count": 0, "layouts": []})
+
