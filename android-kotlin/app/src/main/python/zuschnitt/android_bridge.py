@@ -59,6 +59,16 @@ def optimize_simple(sheets_data, pieces_data, kerf=3.0):
                 "pieces_count": len(layout.placements),
                 "waste": waste,
                 "efficiency": (used_area / total_area * 100) if total_area > 0 else 0.0,
+                "placements": [
+                    {
+                        "x": p.x,
+                        "y": p.y,
+                        "placed_width": p.placed_width,
+                        "placed_height": p.placed_height,
+                        "label": p.piece.label or f"{p.piece.width:.0f}×{p.piece.height:.0f}",
+                    }
+                    for p in layout.placements
+                ],
             })
 
         return result
