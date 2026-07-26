@@ -32,7 +32,20 @@ class PiecesPanel(QWidget):
         cols = _COLS_2D if self._mode == "2d" else _COLS_1D
         self._table = QTableWidget(0, len(cols))
         self._table.setHorizontalHeaderLabels(cols)
-        self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        hh = self._table.horizontalHeader()
+        if self._mode == "2d":
+            # Width, Height: interactive narrow; Qty: narrow; Label: stretch; Rotate, Grain: narrow
+            for col, width in [(0, 75), (1, 75), (2, 45), (4, 60), (5, 80)]:
+                hh.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+                hh.resizeSection(col, width)
+            hh.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)  # Label
+        else:
+            # Length: interactive; Qty: narrow; Label: stretch
+            hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+            hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+            hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+            hh.resizeSection(0, 90)
+            hh.resizeSection(1, 50)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         layout.addWidget(self._table)
 

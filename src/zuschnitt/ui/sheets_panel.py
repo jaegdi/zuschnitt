@@ -27,7 +27,15 @@ class SheetsPanel(QWidget):
 
         self._table = QTableWidget(0, len(_COLS))
         self._table.setHorizontalHeaderLabels(_COLS)
-        self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        hh = self._table.horizontalHeader()
+        # Width, Height: fixed narrow; Qty: fixed narrow; Label: stretches
+        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        hh.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        hh.resizeSection(0, 80)
+        hh.resizeSection(1, 80)
+        hh.resizeSection(2, 50)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         layout.addWidget(self._table)
 
