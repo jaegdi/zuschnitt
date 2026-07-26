@@ -4,65 +4,83 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import Qt, QRectF, QPointF, QLineF
-from PySide6.QtGui import QColor, QPen, QBrush, QFont, QPolygonF
+from PySide6.QtCore import Qt, QRectF
+from PySide6.QtGui import QColor, QPen, QBrush, QFont, QPainter
 from PySide6.QtWidgets import (
     QGraphicsView, QGraphicsScene, QGraphicsRectItem, QGraphicsTextItem,
-    QGraphicsLineItem, QGraphicsPolygonItem,
+    QGraphicsLineItem, QGraphicsEllipseItem,
 )
 
 from zuschnitt.core.models import SheetLayout, BarLayout
+from zuschnitt.core.cuts import compute_cuts
 
-# ── helpers ──────────────────────────────────────────────────────────────────
+# ── drawing helpers ──────────────────────────────────────────────────────────
 
 def _add_text(scene, text: str, cx: float, cy: float, font: QFont,
-              color=Qt.GlobalColor.black) -> QGraphicsTextItem:
-    """Add centred text at (cx, cy) in scene coordinates."""
+              color: QColor = None) -> QGraphicsTextItem:
     item = QGraphicsTextItem(text)
     item.setFont(font)
-    item.setDefaultTextColor(color)
+    item.setDefaultTextColor(color or Qt.GlobalColor.black)
     r = item.boundingRect()
     item.setPos(cx - r.width() / 2, cy - r.height() / 2)
     scene.addItem(item)
     return item
 
 
-def _arrow_line(scene, x1: float, y1: float, x2: float, y2: float,
-                pen: QPen, arrow_size: float = 8.0):
-    """Draw a line with arrowheads at both ends."""
-    scene.addItem(_make_line(x1, y1, x2, y2, pen))
-    for (ax, ay, bx, by) in [(x1, y1, x2, y2), (x2, y2, x1, y1)]:
-        angle = math.atan2(by - ay, bx - ax)
-        for side in (+1, -1):
-            lx = ax + arrow_size * math.cos(angle + side * math.radians(150))
-            ly = ay + arrow_size * math.sin(angle + side * math.radians(150))
-            scene.addItem(_make_line(ax, ay, lx, ly, pen))
-
-
-def _make_line(x1, y1, x2, y2, pen: QPen) -> QGraphicsLineItem:
+def _line(scene, x1, y1, x2, y2, pen) -> QGraphicsLineItem:
     item = QGraphicsLineItem(x1, y1, x2, y2)
     item.setPen(pen)
+    scene.addItem(item)
     return item
 
 
+def _arrow(scene, x1, y1, x2, y2, pen, size=8.0):
+    _line(scene, x1, y1, x2, y2, pen)
+    for ax, ay, bx, by in [(x1, y1, x2, y2), (x2, y2, x1, y1)]:
+        angle = math.atan2(by - ay, bx - ax)
+        for side in (+1, -1):
+            lx = ax + size * math.cos(angle + side * math.radians(150))
+            ly = ay + size * math.sin(angle + side * math.radians(150))
+            _line(scene, ax, ay, lx, ly, pen)
+
+
 def _dim_pen() -> QPen:
-    pen = QPen(QColor("#444444"), 1, Qt.PenStyle.SolidLine)
+    return QPen(QColor("#444444"), 1)
+
+
+def _cut_pen() -> QPen:
+    pen = QPen(QColor("#c0392b"), 1.5, Qt.PenStyle.DashLine)
+    pen.setDashPattern([6, 4])
     return pen
+
+
+def _circle_label(scene, cx, cy, number: int, radius=10.0, font=None):
+    circ = QGraphicsEllipseItem(cx - radius, cy - radius, radius * 2, radius * 2)
+    circ.setBrush(QBrush(QColor("#c0392b")))
+    circ.setPen(QPen(Qt.GlobalColor.white, 1))
+    scene.addItem(circ)
+    lbl = QGraphicsTextItem(str(number))
+    if font:
+        lbl.setFont(font)
+    lbl.setDefaultTextColor(Qt.GlobalColor.white)
+    r = lbl.boundingRect()
+    lbl.setPos(cx - r.width() / 2, cy - r.height() / 2)
+    scene.addItem(lbl)
 
 
 # ── 2-D canvas ───────────────────────────────────────────────────────────────
 
 class SheetCanvas(QGraphicsView):
-    """Displays a 2-D sheet layout with color-coded piece rectangles and dimensions."""
+    """Displays a 2-D sheet layout with pieces, cut lines, and dimensions."""
 
-    DIM_OFFSET = 25   # space outside the sheet reserved for dimension lines
-    MARGIN = 10       # extra space around the whole drawing
+    DIM_OFFSET = 30
+    MARGIN = 10
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
-        self.setRenderHint(self.renderHints().Antialiasing)
+        self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self._layout: SheetLayout | None = None
@@ -80,46 +98,50 @@ class SheetCanvas(QGraphicsView):
         sw, sh = sheet.width, sheet.height
         D = self.DIM_OFFSET
 
-        piece_font_size = max(6, int(min(sw, sh) / 50))
-        piece_font = QFont("Arial", piece_font_size)
-        dim_font = QFont("Arial", max(5, piece_font_size - 1))
+        pfs = max(6, int(min(sw, sh) / 50))
+        piece_font = QFont("Arial", pfs)
+        bold_font = QFont("Arial", pfs)
+        bold_font.setBold(True)
+        dim_font = QFont("Arial", max(5, pfs - 1))
+        cut_num_font = QFont("Arial", max(5, pfs - 2))
         dim_pen = _dim_pen()
+        cut_pen = _cut_pen()
 
-        # ── Sheet background ──────────────────────────────────────────────
+        # Sheet background
         bg = QGraphicsRectItem(QRectF(0, 0, sw, sh))
         bg.setBrush(QBrush(QColor("#f5f5f0")))
         bg.setPen(QPen(QColor("#333333"), 2))
         self._scene.addItem(bg)
 
-        # ── Sheet overall dimensions ──────────────────────────────────────
-        # Width arrow above the sheet
-        _arrow_line(self._scene, 0, -D, sw, -D, dim_pen)
-        # extension lines
-        self._scene.addItem(_make_line(0, 0, 0, -D - 4, dim_pen))
-        self._scene.addItem(_make_line(sw, 0, sw, -D - 4, dim_pen))
+        # Overall width dimension (above)
+        _arrow(self._scene, 0, -D, sw, -D, dim_pen)
+        _line(self._scene, 0, 0, 0, -D - 4, dim_pen)
+        _line(self._scene, sw, 0, sw, -D - 4, dim_pen)
         _add_text(self._scene, f"{sw:.0f}", sw / 2, -D, dim_font, QColor("#222"))
 
-        # Height arrow left of the sheet
-        _arrow_line(self._scene, -D, 0, -D, sh, dim_pen)
-        self._scene.addItem(_make_line(0, 0, -D - 4, 0, dim_pen))
-        self._scene.addItem(_make_line(0, sh, -D - 4, sh, dim_pen))
-        # Rotate height label
+        # Overall height dimension (left, rotated)
+        _arrow(self._scene, -D, 0, -D, sh, dim_pen)
+        _line(self._scene, 0, 0, -D - 4, 0, dim_pen)
+        _line(self._scene, 0, sh, -D - 4, sh, dim_pen)
         ht = QGraphicsTextItem(f"{sh:.0f}")
         ht.setFont(dim_font)
         ht.setDefaultTextColor(QColor("#222"))
         r = ht.boundingRect()
         ht.setTransformOriginPoint(r.width() / 2, r.height() / 2)
         ht.setRotation(-90)
-        ht.setPos(-D - r.height() / 2 - r.width() / 2,
-                  sh / 2 + r.width() / 2)
+        ht.setPos(-D - r.height() / 2 - r.width() / 2, sh / 2 + r.width() / 2)
         self._scene.addItem(ht)
 
-        # ── Pieces ────────────────────────────────────────────────────────
+        # Reference marker (green dot at origin)
+        ref = QGraphicsEllipseItem(-5, -5, 10, 10)
+        ref.setBrush(QBrush(QColor("#27ae60")))
+        ref.setPen(QPen(Qt.GlobalColor.white, 1))
+        self._scene.addItem(ref)
+
+        # Pieces
         for placement in self._layout.placements:
             x, y = placement.x, placement.y
-            pw = placement.placed_width
-            ph = placement.placed_height
-
+            pw, ph = placement.placed_width, placement.placed_height
             color = QColor(placement.piece.color or "#4e79a7")
             color.setAlpha(200)
 
@@ -128,22 +150,42 @@ class SheetCanvas(QGraphicsView):
             rect_item.setPen(QPen(Qt.GlobalColor.black, 1))
             self._scene.addItem(rect_item)
 
-            # ── Inside label: name (if any) + dimensions ──────────────
             name = placement.piece.label or ""
             rot_mark = " ↻" if placement.rotated else ""
             dim_str = f"{pw:.0f} × {ph:.0f}"
-            cx = x + pw / 2
-            cy = y + ph / 2
+            cx, cy = x + pw / 2, y + ph / 2
 
             if name:
-                name_font = QFont("Arial", max(6, piece_font_size))
-                name_font.setBold(True)
-                _add_text(self._scene, name + rot_mark, cx, cy - piece_font_size, name_font)
-                _add_text(self._scene, dim_str, cx, cy + piece_font_size, piece_font)
+                _add_text(self._scene, name + rot_mark, cx, cy - pfs, bold_font)
+                _add_text(self._scene, dim_str, cx, cy + pfs, piece_font)
             else:
                 _add_text(self._scene, dim_str + rot_mark, cx, cy, piece_font)
 
-        total = self.DIM_OFFSET + self.MARGIN
+        # Cut lines and numbered circles
+        cuts = compute_cuts(self._layout)
+        CIRCLE_R = max(7.0, min(sw, sh) / 55)
+
+        for cut in cuts:
+            if cut.orientation == "H":
+                _line(self._scene, 0, cut.position, sw, cut.position, cut_pen)
+                # Tick + distance label on left
+                _line(self._scene, -D * 0.55, cut.position, 0, cut.position, dim_pen)
+                _add_text(self._scene, f"{cut.position:.0f}",
+                          -D * 0.55 - 20, cut.position, dim_font, QColor("#555"))
+                # Numbered circle on right
+                _circle_label(self._scene, sw + CIRCLE_R + 4, cut.position,
+                               cut.number, CIRCLE_R, cut_num_font)
+            else:
+                _line(self._scene, cut.position, 0, cut.position, sh, cut_pen)
+                # Tick + distance label on top
+                _line(self._scene, cut.position, -D * 0.55, cut.position, 0, dim_pen)
+                _add_text(self._scene, f"{cut.position:.0f}",
+                          cut.position, -D * 0.55 - 14, dim_font, QColor("#555"))
+                # Numbered circle on bottom
+                _circle_label(self._scene, cut.position, sh + CIRCLE_R + 4,
+                               cut.number, CIRCLE_R, cut_num_font)
+
+        total = D + self.MARGIN + CIRCLE_R * 2 + 35
         self._scene.setSceneRect(-total, -total, sw + 2 * total, sh + 2 * total)
         self.fitInView(self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
 
@@ -169,7 +211,7 @@ class BarCanvas(QGraphicsView):
         super().__init__(parent)
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
-        self.setRenderHint(self.renderHints().Antialiasing)
+        self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self._layout: BarLayout | None = None
 
@@ -187,22 +229,32 @@ class BarCanvas(QGraphicsView):
         H = 60.0
         D = self.DIM_OFFSET
         dim_pen = _dim_pen()
+        cut_pen = _cut_pen()
         dim_font = QFont("Arial", 8)
-        piece_font = QFont("Arial", 8)
+        bold_font = QFont("Arial", 8)
+        bold_font.setBold(True)
+        cut_num_font = QFont("Arial", 7)
+        CIRCLE_R = 8.0
 
-        # ── Bar background ────────────────────────────────────────────────
+        # Bar background
         bg = QGraphicsRectItem(QRectF(0, 0, blen, H))
         bg.setBrush(QBrush(QColor("#f5f5f0")))
         bg.setPen(QPen(QColor("#333"), 2))
         self._scene.addItem(bg)
 
-        # ── Overall length dimension above bar ────────────────────────────
-        _arrow_line(self._scene, 0, -D, blen, -D, dim_pen)
-        self._scene.addItem(_make_line(0, 0, 0, -D - 4, dim_pen))
-        self._scene.addItem(_make_line(blen, 0, blen, -D - 4, dim_pen))
+        # Overall length dimension above
+        _arrow(self._scene, 0, -D, blen, -D, dim_pen)
+        _line(self._scene, 0, 0, 0, -D - 4, dim_pen)
+        _line(self._scene, blen, 0, blen, -D - 4, dim_pen)
         _add_text(self._scene, f"{blen:.0f}", blen / 2, -D, dim_font, QColor("#222"))
 
-        # ── Pieces ────────────────────────────────────────────────────────
+        # Reference marker (green dot at left)
+        ref = QGraphicsEllipseItem(-5, H / 2 - 5, 10, 10)
+        ref.setBrush(QBrush(QColor("#27ae60")))
+        ref.setPen(QPen(Qt.GlobalColor.white, 1))
+        self._scene.addItem(ref)
+
+        cut_num = 0
         for pl in self._layout.placements:
             x = pl.offset
             w = pl.piece.length
@@ -214,27 +266,29 @@ class BarCanvas(QGraphicsView):
             rect.setPen(QPen(Qt.GlobalColor.black, 1))
             self._scene.addItem(rect)
 
-            # Piece dimension line below bar
-            _arrow_line(self._scene, x, H + D * 0.6, x + w, H + D * 0.6, dim_pen)
-            self._scene.addItem(_make_line(x, H, x, H + D * 0.6 + 4, dim_pen))
-            self._scene.addItem(_make_line(x + w, H, x + w, H + D * 0.6 + 4, dim_pen))
-
             cx = x + w / 2
             label = pl.piece.label or ""
             if label:
-                bold = QFont("Arial", 8)
-                bold.setBold(True)
-                _add_text(self._scene, label, cx, H / 2 - 8, bold)
-            _add_text(self._scene, f"{w:.0f}", cx, H + D * 0.6, dim_font, QColor("#222"))
+                _add_text(self._scene, label, cx, H / 2 - 8, bold_font)
+            _add_text(self._scene, f"{w:.0f}", cx, H / 2 + 4, dim_font)
 
-        total = self.DIM_OFFSET + self.MARGIN
+            # Cut line at right edge (skip sheet boundary)
+            cut_x = x + w
+            if cut_x < blen - 0.5:
+                cut_num += 1
+                _line(self._scene, cut_x, 0, cut_x, H, cut_pen)
+                _line(self._scene, cut_x, H, cut_x, H + D * 0.6, dim_pen)
+                _add_text(self._scene, f"{cut_x:.0f}",
+                          cut_x, H + D * 0.6 + 8, dim_font, QColor("#555"))
+                _circle_label(self._scene, cut_x, H + D * 0.6 + CIRCLE_R + 18,
+                               cut_num, CIRCLE_R, cut_num_font)
+
+        total = D + self.MARGIN + CIRCLE_R * 2 + 30
         self._scene.setSceneRect(
-            -total, -total,
-            blen + 2 * total, H + D + 2 * self.MARGIN
+            -total, -total, blen + 2 * total, H + total + D + 30
         )
         self.fitInView(self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
 
     def wheelEvent(self, event):
         factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
         self.scale(factor, factor)
-
