@@ -89,6 +89,7 @@ class AppState(context: Context) {
                 put("width", p.width)
                 put("height", p.height)
                 put("quantity", p.quantity)
+                put("can_rotate", p.canRotate)
             })
         }
         obj.put("sheets", sheetsArr)
@@ -105,7 +106,12 @@ class AppState(context: Context) {
         }.toMutableList()
         pieces = (0 until obj.getJSONArray("pieces").length()).map { i ->
             val p = obj.getJSONArray("pieces").getJSONObject(i)
-            Piece(p.getDouble("width").toFloat(), p.getDouble("height").toFloat(), p.getInt("quantity"))
+            Piece(
+                p.getDouble("width").toFloat(),
+                p.getDouble("height").toFloat(),
+                p.getInt("quantity"),
+                p.optBoolean("can_rotate", true)
+            )
         }.toMutableList()
         if (obj.has("kerf")) {
             settings = settings.copy(kerf = obj.getDouble("kerf").toFloat())

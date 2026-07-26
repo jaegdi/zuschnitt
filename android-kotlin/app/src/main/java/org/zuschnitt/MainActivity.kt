@@ -33,7 +33,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 data class Sheet(val width: Float, val height: Float, val quantity: Int)
-data class Piece(val width: Float, val height: Float, val quantity: Int)
+data class Piece(val width: Float, val height: Float, val quantity: Int, val canRotate: Boolean = true)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -150,14 +150,16 @@ fun ZuschnittApp(appState: AppState) {
 
     pieceDialogIndex?.let { idx ->
         val existing = if (idx >= 0) appState.pieces[idx] else null
-        ItemDialog(
+        PieceDialog(
             title = if (existing == null) "Add Piece" else "Edit Piece",
             initialWidth = existing?.width ?: 200f,
             initialHeight = existing?.height ?: 100f,
             initialQty = existing?.quantity ?: 1,
-            onConfirm = { w, h, qty ->
+            initialCanRotate = existing?.canRotate ?: true,
+            onConfirm = { w, h, qty, canRotate ->
                 appState.pieces = appState.pieces.toMutableList().also {
-                    if (idx >= 0) it[idx] = Piece(w, h, qty) else it.add(Piece(w, h, qty))
+                    if (idx >= 0) it[idx] = Piece(w, h, qty, canRotate)
+                    else it.add(Piece(w, h, qty, canRotate))
                 }
                 pieceDialogIndex = null
             },
@@ -410,7 +412,7 @@ fun ZuschnittApp(appState: AppState) {
             itemsIndexed(appState.pieces) { idx, piece ->
                 ItemCard(
                     label = "${piece.width.toInt()} × ${piece.height.toInt()} mm",
-                    sublabel = "Qty: ${piece.quantity}",
+                    sublabel = "Qty: ${piece.quantity}  •  ${if (piece.canRotate) "↻ rotation on" else "⊘ fixed orientation"}",
                     onClick = { pieceDialogIndex = idx },
                     onDelete = { appState.pieces = appState.pieces.toMutableList().also { it.removeAt(idx) } }
                 )
@@ -514,6 +516,75 @@ fun ItemDialog(
     )
 }
 
+@Composable
+fun PieceDialog(
+    title: String,
+    initialWidth: Float,
+    initialHeight: Float,
+    initialQty: Int,
+    initialCanRotate: Boolean,
+    onConfirm: (Float, Float, Int, Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var widthText by remember { mutableStateOf(initialWidth.toInt().toString()) }
+    var heightText by remember { mutableStateOf(initialHeight.toInt().toString()) }
+    var qtyText by remember { mutableStateOf(initialQty.toString()) }
+    var canRotate by remember { mutableStateOf(initialCanRotate) }
+
+    val w = widthText.toFloatOrNull()
+    val h = heightText.toFloatOrNull()
+    val q = qtyText.toIntOrNull()
+    val valid = w != null && w > 0 && h != null && h > 0 && q != null && q > 0
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = widthText, onValueChange = { widthText = it },
+                    label = { Text("Width (mm)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true, isError = w == null || w <= 0,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = heightText, onValueChange = { heightText = it },
+                    label = { Text("Height (mm)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true, isError = h == null || h <= 0,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = qtyText, onValueChange = { qtyText = it },
+                    label = { Text("Quantity") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true, isError = q == null || q <= 0,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Allow rotation", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            if (canRotate) "Optimizer may rotate 90°" else "Fixed orientation",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(checked = canRotate, onCheckedChange = { canRotate = it })
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(w!!, h!!, q!!, canRotate) }, enabled = valid) { Text("OK") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
 fun runOptimizer(
     sheets: List<Sheet>,
     pieces: List<Piece>,
@@ -538,7 +609,8 @@ fun runOptimizer(
                 arr.put(org.json.JSONObject()
                     .put("width", p.width.toDouble())
                     .put("height", p.height.toDouble())
-                    .put("quantity", p.quantity))
+                    .put("quantity", p.quantity)
+                    .put("can_rotate", p.canRotate))
             }
         }.toString()
 
