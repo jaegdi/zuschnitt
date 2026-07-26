@@ -395,6 +395,20 @@ fun ZuschnittApp(appState: AppState) {
                     onDelete = { appState.pieces = appState.pieces.toMutableList().also { it.removeAt(idx) } }
                 )
             }
+
+            // Visual layout results
+            if (lastLayouts.isNotEmpty()) {
+                item {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Layout",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+                itemsIndexed(lastLayouts) { idx, layout ->
+                    SheetResultCard(sheetIndex = idx, layout = layout)
+                }
+            }
         }
     }
 }
