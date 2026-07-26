@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "name": "Untitled",
+  "mode": "2d",
+  "settings": {
+    "kerf": 3.4,
+    "unit": "mm",
+    "allow_rotation": true,
+    "grain_direction": false
+  },
+  "sheets": [
+    {
+      "width": 2500.0,
+      "height": 1250.0,
+      "quantity": 1,
+      "label": "Betoplan 12mm"
+    }
+  ],
+  "pieces_2d": [
+    {
+      "width": 548.0,
+      "height": 511.0,
+      "quantity": 1,
+      "label": "Boden",
+      "can_rotate": false,
+      "grain_locked": false,
+      "color": "#4e79a7"
+    },
+    {
+      "width": 548.0,
+      "height": 232.0,
+      "quantity": 2,
+      "label": "Seiten",
+      "can_rotate": false,
+      "grain_locked": false,
+      "color": "#f28e2b"
+    },
+    {
+      "width": 560.0,
+      "height": 212.0,
+      "quantity": 1,
+      "label": "Rückwand",
+      "can_rotate": false,
+      "grain_locked": false,
+      "color": "#e15759"
+    }
+  ],
+  "bars": [],
+  "pieces_1d": []
+}

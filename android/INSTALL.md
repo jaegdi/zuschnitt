@@ -59,10 +59,13 @@ cd /path/to/zuschnitt/android
 bash build.sh
 ```
 
-`build.sh` mounts the `android/` folder into the container and runs
-`buildozer android debug`. The **first build** takes **15–30 minutes**
-(downloads NDK r28c, Android SDK, compiles Kivy). Subsequent builds are
-much faster because `.buildozer/` is cached on your host.
+`build.sh` mounts two directories into the container:
+- `android/` → `/home/user/hostcwd` (source + output)
+- `~/.buildozer` → `/home/user/.buildozer` (SDK/NDK cache, reused across builds)
+
+The **first build** takes **15–30 minutes** (downloads NDK r28c, Android SDK,
+compiles Kivy). Subsequent builds are much faster because `.buildozer/` is
+cached in your home directory.
 
 The finished APK appears in `android/bin/`:
 
