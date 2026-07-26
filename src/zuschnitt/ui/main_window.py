@@ -337,6 +337,13 @@ class MainWindow(QMainWindow):
     # Export
     # ------------------------------------------------------------------
 
+    def _export_default_name(self) -> str:
+        """Return the base name to suggest in export dialogs."""
+        if self._current_path:
+            return self._current_path.stem
+        name = self._project.name or ""
+        return name if name and name != "Untitled" else "cutting_plan"
+
     def _export_pdf(self):
         self._sync_project_from_ui()
         p = self._project
@@ -344,8 +351,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Export", "Run optimization first.")
             return
         default_dir = str(self._current_path.parent) if self._current_path else ""
-        default_name = p.name if p.name and p.name != "Untitled" else "cutting_plan"
-        default_path = str(Path(default_dir) / f"{default_name}.pdf") if default_dir else f"{default_name}.pdf"
+        default_path = str(Path(default_dir) / f"{self._export_default_name()}.pdf") if default_dir else f"{self._export_default_name()}.pdf"
         path, _ = QFileDialog.getSaveFileName(
             self, "Export PDF", default_path, "PDF files (*.pdf)"
         )
@@ -370,6 +376,8 @@ class MainWindow(QMainWindow):
         )
         if folder:
             try:
+                # Pass the stem so SVG files get a consistent prefix
+                p.name = self._export_default_name()
                 export_svg(p, Path(folder))
                 self.statusBar().showMessage(f"SVG exported to: {folder}", 3000)
             except Exception as e:
