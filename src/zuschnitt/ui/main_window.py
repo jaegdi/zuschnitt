@@ -7,9 +7,9 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QSplitter, QPushButton, QComboBox, QLabel,
-    QFileDialog, QMessageBox, QToolBar, QStatusBar,
+    QFileDialog, QMessageBox, QToolBar, QStatusBar, QMenu,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSettings
 from PySide6.QtGui import QAction, QKeySequence
 
 from zuschnitt.core.models import Project, Settings
@@ -24,6 +24,7 @@ from zuschnitt.ui.settings_dialog import SettingsDialog
 from zuschnitt.visualization.exporter import export_pdf, export_svg
 
 _FILE_FILTER = "Zuschnitt projects (*.zusc);;All files (*)"
+_MAX_RECENT = 10
 
 
 class MainWindow(QMainWindow):
@@ -34,11 +35,13 @@ class MainWindow(QMainWindow):
 
         self._project = Project()
         self._current_path: Path | None = None
+        self._qsettings = QSettings("Zuschnitt", "Zuschnitt")
 
         self._build_menu()
         self._build_toolbar()
         self._build_central()
         self._update_mode_ui()
+        self._rebuild_recent_menu()
 
         if open_path:
             self._do_open(open_path)
@@ -54,6 +57,9 @@ class MainWindow(QMainWindow):
         file_menu = mb.addMenu("&File")
         self._act(file_menu, "&New", self._new, QKeySequence.StandardKey.New)
         self._act(file_menu, "&Open…", self._open, QKeySequence.StandardKey.Open)
+
+        self._recent_menu = file_menu.addMenu("Open &Recent")
+
         self._act(file_menu, "&Save", self._save, QKeySequence.StandardKey.Save)
         self._act(file_menu, "Save &As…", self._save_as, QKeySequence.StandardKey.SaveAs)
         file_menu.addSeparator()
@@ -205,6 +211,63 @@ class MainWindow(QMainWindow):
         self._pieces_panel_1d.set_pieces_1d(p.pieces_1d)
 
     # ------------------------------------------------------------------
+    # Recent files
+    # ------------------------------------------------------------------
+
+    def _get_recent(self) -> list[str]:
+        return self._qsettings.value("recentFiles", []) or []
+
+    def _add_to_recent(self, path: Path) -> None:
+        files = self._get_recent()
+        s = str(path.resolve())
+        if s in files:
+            files.remove(s)
+        files.insert(0, s)
+        self._qsettings.setValue("recentFiles", files[:_MAX_RECENT])
+        self._rebuild_recent_menu()
+
+    def _rebuild_recent_menu(self) -> None:
+        self._recent_menu.clear()
+        files = self._get_recent()
+        if not files:
+            placeholder = QAction("(no recent files)", self)
+            placeholder.setEnabled(False)
+            self._recent_menu.addAction(placeholder)
+            return
+        for i, path_str in enumerate(files):
+            p = Path(path_str)
+            action = QAction(f"&{i+1}  {p.name}  —  {p.parent}", self)
+            action.setToolTip(path_str)
+            action.setData(path_str)
+            action.triggered.connect(self._open_recent)
+            self._recent_menu.addAction(action)
+        self._recent_menu.addSeparator()
+        clear_act = QAction("Clear Recent Files", self)
+        clear_act.triggered.connect(self._clear_recent)
+        self._recent_menu.addAction(clear_act)
+
+    def _open_recent(self) -> None:
+        action = self.sender()
+        if action:
+            path = Path(action.data())
+            if path.exists():
+                self._do_open(path)
+            else:
+                QMessageBox.warning(
+                    self, "File not found",
+                    f"The file no longer exists:\n{path}"
+                )
+                files = self._get_recent()
+                if str(path) in files:
+                    files.remove(str(path))
+                self._qsettings.setValue("recentFiles", files)
+                self._rebuild_recent_menu()
+
+    def _clear_recent(self) -> None:
+        self._qsettings.setValue("recentFiles", [])
+        self._rebuild_recent_menu()
+
+    # ------------------------------------------------------------------
     # File actions
     # ------------------------------------------------------------------
 
@@ -225,6 +288,7 @@ class MainWindow(QMainWindow):
             self._current_path = path
             self._sync_ui_from_project()
             self.setWindowTitle(f"Zuschnitt – {path.name}")
+            self._add_to_recent(path)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Could not open file:\n{e}")
 
@@ -248,6 +312,7 @@ class MainWindow(QMainWindow):
             self._current_path = path
             self.setWindowTitle(f"Zuschnitt – {path.name}")
             self.statusBar().showMessage(f"Saved: {path}", 3000)
+            self._add_to_recent(path)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Could not save file:\n{e}")
 
