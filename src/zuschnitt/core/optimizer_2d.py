@@ -56,11 +56,13 @@ class _MaxRects:
 
         for pw, ph, rotated in candidates:
             for free in self._free:
-                # account for kerf on right/bottom edges of placed piece
-                needed_w = pw + (self.kerf if free.x + pw + self.kerf <= self.bin_w else 0)
-                needed_h = ph + (self.kerf if free.y + ph + self.kerf <= self.bin_h else 0)
-                if pw <= free.w and ph <= free.h:
-                    short = min(free.w - pw, free.h - ph)
+                # Reserve kerf space to the right/below unless piece sits at the sheet edge
+                kw = self.kerf if free.x + pw < self.bin_w else 0
+                kh = self.kerf if free.y + ph < self.bin_h else 0
+                needed_w = pw + kw
+                needed_h = ph + kh
+                if needed_w <= free.w and needed_h <= free.h:
+                    short = min(free.w - needed_w, free.h - needed_h)
                     if short < best_score:
                         best_score = short
                         best_rect = free

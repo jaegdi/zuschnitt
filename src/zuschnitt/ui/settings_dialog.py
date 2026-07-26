@@ -24,7 +24,7 @@ class SettingsDialog(QDialog):
         self._kerf.setDecimals(1)
         self._kerf.setSuffix(" mm")
         self._kerf.setValue(s.kerf)
-        form.addRow("Blade kerf:", self._kerf)
+        form.addRow("Saw blade width (kerf):", self._kerf)
 
         self._unit = QComboBox()
         self._unit.addItems(["mm", "cm", "inch"])

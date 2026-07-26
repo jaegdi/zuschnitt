@@ -40,14 +40,16 @@ class TestOptimize2D:
         assert unplaced == []
 
     def test_kerf_reduces_usable_area(self):
-        # 3 pieces of 490 mm on a 1000 mm wide, 500 mm sheet with 10 mm kerf
-        # Total needed width: 490 + 10 + 490 + 10 + 490 = 1490 > 1000  → only 2 fit per row
+        # Sheet 1000×500, kerf 10mm, piece 490×490 (no rotation)
+        # First piece: 490+10=500 wide → fits. Second piece needs another 500 wide → total 1000, fits.
+        # Third piece: 490+10=500 wide → total 1500 > 1000, won't fit beside; also no vertical room.
+        # So exactly 2 pieces should fit.
         sheets = [StockSheet(width=1000, height=500, quantity=1)]
         pieces = [Piece2D(width=490, height=490, quantity=3, can_rotate=False)]
         layouts, unplaced = optimize_2d(sheets, pieces, kerf=10, allow_rotation=False)
-        # At most 1 piece fits per 490×490 slot with 10mm kerf on a 1000×500 sheet
         total_placed = sum(len(l.placements) for l in layouts)
-        assert total_placed <= 3
+        assert total_placed == 2
+        assert len(unplaced) == 1
 
     def test_waste_calculation(self):
         sheets = [StockSheet(width=1000, height=1000, quantity=1)]
