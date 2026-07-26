@@ -40,3 +40,15 @@ zuschnitt --open myplan.zusc # open existing project
 pip install -e ".[dev]"
 pytest
 ```
+
+## Android App
+
+A native Kotlin Android app is available in [`android-kotlin/`](android-kotlin/).
+
+**Features:**
+- Native UI with Jetpack Compose and Material 3
+- Python optimizer core embedded via Chaquopy
+- Works offline
+- Fast startup
+
+See [`android-kotlin/README.md`](android-kotlin/README.md) for build instructions.
