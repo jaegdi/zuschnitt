@@ -22,7 +22,7 @@ class MainActivity : ComponentActivity() {
         
         // Initialize Python
         if (!Python.isStarted()) {
-            AndroidPlatform.start(this)
+            Python.start(AndroidPlatform(this))
         }
         
         enableEdgeToEdge()

@@ -7,12 +7,12 @@ plugins {
 
 android {
     namespace = "org.zuschnitt"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "org.zuschnitt"
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
 
@@ -21,13 +21,6 @@ android {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
         }
 
-        python {
-            version = "3.11"
-            pip {
-                // Pure Python dependencies work out of the box
-                // (no native compilation needed)
-            }
-        }
     }
 
     buildTypes {
@@ -56,6 +49,7 @@ android {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.activity:activity-compose:1.9.3")
     
@@ -79,4 +73,10 @@ dependencies {
     // Debug
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+}
+
+chaquopy {
+    defaultConfig {
+        version = "3.11"
+    }
 }
