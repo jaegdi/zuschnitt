@@ -1,0 +1,2 @@
+[console_scripts]
+zuschnitt = zuschnitt.main:main
