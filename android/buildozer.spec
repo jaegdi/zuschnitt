@@ -13,7 +13,7 @@ version = 0.1.0
 
 # Python requirements — must be installable via pip
 # kivy is not version-pinned so p4a picks the compatible release for the Python version it builds
-requirements = python3,kivy,reportlab,Pillow
+requirements = python3,kivy,fpdf2,Pillow
 
 # Orientation: allow both portrait and landscape on tablets
 orientation = all
@@ -23,6 +23,10 @@ orientation = all
 
 # Buildozer / p4a internals
 android.permissions = WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,INTERNET
+
+# Android SDK / NDK — reuse the host cache mounted at /home/user/.buildozer
+android.sdk_path = /home/user/.buildozer/android/platform/android-sdk
+android.ndk_path = /home/user/.buildozer/android/platform/android-ndk-r28c
 
 # Target Android API (Android 13)
 android.api = 33
