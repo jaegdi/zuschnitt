@@ -5,6 +5,11 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (z. B. v0.1.2)"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -35,14 +40,31 @@ jobs:
         run: ./gradlew assembleRelease
 
       - name: Prepare release artifact
+        id: prepare
         run: |
           set -e
-          TAG="${GITHUB_REF#refs/tags/}"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+
+          APK_PATH=$(find app/build/outputs/apk/release -maxdepth 1 -type f -name "*.apk" | head -n 1)
+          if [ -z "$APK_PATH" ]; then
+            echo "No APK found in app/build/outputs/apk/release"
+            ls -la app/build/outputs/apk/release || true
+            exit 1
+          fi
+
+          APK_BASENAME=$(basename "$APK_PATH")
           mkdir -p ../release-assets
-          cp app/build/outputs/apk/release/app-release-unsigned.apk "../release-assets/zuschnitt-${TAG}-release-unsigned.apk"
+          cp "$APK_PATH" "../release-assets/zuschnitt-${TAG}-${APK_BASENAME}"
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub release and upload APK
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.prepare.outputs.tag }}
           files: release-assets/*.apk
           generate_release_notes: true
