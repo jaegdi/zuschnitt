@@ -57,21 +57,22 @@ jobs:
           fi
 
           APK_BASENAME=$(basename "$APK_PATH")
-          mkdir -p ../release-assets
-          cp "$APK_PATH" "../release-assets/zuschnitt-${TAG}-${APK_BASENAME}"
+          mkdir -p "$GITHUB_WORKSPACE/release-assets"
+          cp "$APK_PATH" "$GITHUB_WORKSPACE/release-assets/zuschnitt-${TAG}-${APK_BASENAME}"
 
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: List release assets
         run: |
           echo "Uploading APK assets:"
-          ls -la release-assets
+          ls -la "$GITHUB_WORKSPACE/release-assets"
 
       - name: Create GitHub release and upload assets
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.prepare.outputs.tag }}
           files: release-assets/*.apk
+          fail_on_unmatched_files: true
           generate_release_notes: true
           body: |
             ## Android APK
