@@ -186,7 +186,7 @@ class MainWindow(QMainWindow):
                 allow_rotation=s.allow_rotation,
             )
             p.sheet_layouts = layouts
-            self._results.show_2d_results(layouts, len(unplaced))
+            self._results.show_2d_results(layouts, len(unplaced), kerf=s.kerf)
         else:
             layouts, unplaced = optimize_1d(p.bars, p.pieces_1d, kerf=s.kerf)
             p.bar_layouts = layouts

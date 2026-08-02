@@ -22,7 +22,7 @@ class ResultsPanel(QWidget):
         self._tabs = QTabWidget()
         layout.addWidget(self._tabs)
 
-    def show_2d_results(self, layouts: list[SheetLayout], unplaced_count: int):
+    def show_2d_results(self, layouts: list[SheetLayout], unplaced_count: int, kerf: float = 0.0):
         self._tabs.clear()
         if not layouts:
             self._summary.setText("No pieces could be placed.")
@@ -41,7 +41,7 @@ class ResultsPanel(QWidget):
 
         for i, layout in enumerate(layouts):
             canvas = SheetCanvas()
-            canvas.set_layout(layout)
+            canvas.set_layout(layout, kerf=kerf)
             stock = layout.stock
             tab_label = (
                 f"Sheet {i+1}"

@@ -13,6 +13,10 @@ from PySide6.QtWidgets import (
 
 from zuschnitt.core.models import SheetLayout, BarLayout
 from zuschnitt.core.cuts import compute_cuts
+from zuschnitt.visualization.cut_label_layout import (
+    place_horizontal_cut_markers,
+    place_vertical_cut_markers,
+)
 
 # ── drawing helpers ──────────────────────────────────────────────────────────
 
@@ -68,6 +72,12 @@ def _circle_label(scene, cx, cy, number: int, radius=10.0, font=None):
     scene.addItem(lbl)
 
 
+def _leader_line(scene, x1, y1, x2, y2, pen) -> None:
+    item = QGraphicsLineItem(x1, y1, x2, y2)
+    item.setPen(pen)
+    scene.addItem(item)
+
+
 # ── 2-D canvas ───────────────────────────────────────────────────────────────
 
 class SheetCanvas(QGraphicsView):
@@ -84,9 +94,11 @@ class SheetCanvas(QGraphicsView):
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self._layout: SheetLayout | None = None
+        self._kerf = 0.0
 
-    def set_layout(self, layout: SheetLayout) -> None:
+    def set_layout(self, layout: SheetLayout, kerf: float = 0.0) -> None:
         self._layout = layout
+        self._kerf = kerf
         self._draw()
 
     def _draw(self) -> None:
@@ -162,30 +174,65 @@ class SheetCanvas(QGraphicsView):
                 _add_text(self._scene, dim_str + rot_mark, cx, cy, piece_font)
 
         # Cut lines and numbered circles
-        cuts = compute_cuts(self._layout)
+        cuts = compute_cuts(self._layout, kerf=self._kerf)
         CIRCLE_R = max(7.0, min(sw, sh) / 55)
+        marker_pen = QPen(QColor("#c0392b"), 1)
+        h_markers = place_horizontal_cut_markers(
+            cuts,
+            anchor_x=sw,
+            label_x=sw + CIRCLE_R + 18,
+            min_sep=CIRCLE_R * 2 + 6,
+        )
+        v_markers = place_vertical_cut_markers(
+            cuts,
+            anchor_y=sh,
+            label_y=sh + CIRCLE_R + 18,
+            min_sep=CIRCLE_R * 2 + 6,
+        )
 
         for cut in cuts:
             if cut.orientation == "H":
                 _line(self._scene, 0, cut.position, sw, cut.position, cut_pen)
-                # Tick + distance label on left
                 _line(self._scene, -D * 0.55, cut.position, 0, cut.position, dim_pen)
                 _add_text(self._scene, f"{cut.position:.0f}",
                           -D * 0.55 - 20, cut.position, dim_font, QColor("#555"))
-                # Numbered circle on right
-                _circle_label(self._scene, sw + CIRCLE_R + 4, cut.position,
-                               cut.number, CIRCLE_R, cut_num_font)
             else:
                 _line(self._scene, cut.position, 0, cut.position, sh, cut_pen)
-                # Tick + distance label on top
                 _line(self._scene, cut.position, -D * 0.55, cut.position, 0, dim_pen)
                 _add_text(self._scene, f"{cut.position:.0f}",
                           cut.position, -D * 0.55 - 14, dim_font, QColor("#555"))
-                # Numbered circle on bottom
-                _circle_label(self._scene, cut.position, sh + CIRCLE_R + 4,
-                               cut.number, CIRCLE_R, cut_num_font)
 
-        total = D + self.MARGIN + CIRCLE_R * 2 + 35
+        for marker in h_markers:
+            _leader_line(
+                self._scene,
+                marker.anchor_x,
+                marker.anchor_y,
+                marker.label_x - CIRCLE_R - 2,
+                marker.label_y,
+                marker_pen,
+            )
+            _circle_label(self._scene, marker.label_x, marker.label_y,
+                          marker.cut.number, CIRCLE_R, cut_num_font)
+
+        for marker in v_markers:
+            _leader_line(
+                self._scene,
+                marker.anchor_x,
+                marker.anchor_y,
+                marker.label_x,
+                marker.label_y - CIRCLE_R - 2,
+                marker_pen,
+            )
+            _circle_label(self._scene, marker.label_x, marker.label_y,
+                          marker.cut.number, CIRCLE_R, cut_num_font)
+
+        max_marker_offset = 0.0
+        if h_markers:
+            max_marker_offset = max(max_marker_offset, max(abs(m.label_y - m.anchor_y) for m in h_markers))
+        if v_markers:
+            max_marker_offset = max(max_marker_offset, max(abs(m.label_x - m.anchor_x) for m in v_markers))
+
+        total = D + self.MARGIN + CIRCLE_R * 2 + max_marker_offset + 35
         self._scene.setSceneRect(-total, -total, sw + 2 * total, sh + 2 * total)
         self.fitInView(self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
 

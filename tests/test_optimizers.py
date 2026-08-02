@@ -65,6 +65,19 @@ class TestOptimize2D:
         layouts, unplaced = optimize_2d(sheets, pieces, kerf=0, allow_rotation=True)
         assert len(unplaced) == 1
 
+    def test_nearly_shared_side_prefers_common_orientation(self):
+        sheets = [StockSheet(width=452, height=250, quantity=1)]
+        pieces = [
+            Piece2D(width=202, height=250, quantity=1, can_rotate=False, label="anchor"),
+            Piece2D(width=100, height=200, quantity=1, can_rotate=True, label="match"),
+        ]
+        layouts, unplaced = optimize_2d(sheets, pieces, kerf=0, allow_rotation=True)
+
+        assert unplaced == []
+        match = next(pl for pl in layouts[0].placements if pl.piece.label == "match")
+        assert match.rotated is True
+        assert (match.placed_width, match.placed_height) == (200, 100)
+
 
 # ---------------------------------------------------------------------------
 # 1-D optimizer

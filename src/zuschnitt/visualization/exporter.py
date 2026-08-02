@@ -6,6 +6,10 @@ from pathlib import Path
 
 from zuschnitt.core.models import Project, SheetLayout, BarLayout
 from zuschnitt.core.cuts import compute_cuts, CutLine
+from zuschnitt.visualization.cut_label_layout import (
+    place_horizontal_cut_markers,
+    place_vertical_cut_markers,
+)
 
 # ---------------------------------------------------------------------------
 # SVG helpers
@@ -49,7 +53,7 @@ def _svg_arrow(x1, y1, x2, y2, stroke="#444", w=1) -> list[str]:
 # SVG: sheet layout
 # ---------------------------------------------------------------------------
 
-def _sheet_to_svg(layout: SheetLayout, unit: str = "mm") -> str:
+def _sheet_to_svg(layout: SheetLayout, unit: str = "mm", kerf: float = 0.0) -> str:
     sw, sh = layout.stock.width, layout.stock.height
     D = _DIM
     VW = sw + 2 * D
@@ -103,8 +107,41 @@ def _sheet_to_svg(layout: SheetLayout, unit: str = "mm") -> str:
             parts.append(_svg_text(x + pw / 2, y + ph / 2, dim_str + rot, font_size=fs))
 
     # Cut lines, dimension ticks, numbered circles
-    cuts = compute_cuts(layout)
+    cuts = compute_cuts(layout, kerf=kerf)
+    cut_values = {cut.number: cut.position for cut in cuts}
     CIRCLE_R = max(7, int(min(sw, sh) / 55))
+    h_svg_cuts = [
+        CutLine(number=cut.number, orientation=cut.orientation, position=OY + cut.position)
+        for cut in cuts if cut.orientation == "H"
+    ]
+    v_svg_cuts = [
+        CutLine(number=cut.number, orientation=cut.orientation, position=OX + cut.position)
+        for cut in cuts if cut.orientation == "V"
+    ]
+    h_markers = place_horizontal_cut_markers(
+        h_svg_cuts,
+        anchor_x=OX + sw,
+        label_x=OX + sw + CIRCLE_R + 18,
+        min_sep=CIRCLE_R * 2 + 6,
+    )
+    v_markers = place_vertical_cut_markers(
+        v_svg_cuts,
+        anchor_y=OY + sh,
+        label_y=OY + sh + CIRCLE_R + 26,
+        min_sep=CIRCLE_R * 2 + 6,
+    )
+    h_dim_markers = place_horizontal_cut_markers(
+        h_svg_cuts,
+        anchor_x=OX,
+        label_x=OX - 18,
+        min_sep=18,
+    )
+    v_dim_markers = place_vertical_cut_markers(
+        v_svg_cuts,
+        anchor_y=OY,
+        label_y=OY - 18,
+        min_sep=18,
+    )
 
     for cut in cuts:
         if cut.orientation == "H":
@@ -112,26 +149,61 @@ def _sheet_to_svg(layout: SheetLayout, unit: str = "mm") -> str:
             parts.append(_svg_line(OX, cy, OX + sw, cy, "#c0392b", 1.5, "6,4"))
             # Tick + label on left
             parts.append(_svg_line(OX - 16, cy, OX, cy, "#444"))
-            parts.append(_svg_text(OX - 18, cy, f"{cut.position:.0f}",
-                                   font_size=fs - 2, anchor="end", fill="#555"))
-            # Number circle on right
-            cx2 = OX + sw + CIRCLE_R + 4
-            parts.append(_svg_circle(cx2, cy, CIRCLE_R, "#c0392b"))
-            parts.append(_svg_text(cx2, cy, str(cut.number),
-                                   font_size=max(6, CIRCLE_R - 2), fill="white"))
         else:
             cx2 = OX + cut.position
             parts.append(_svg_line(cx2, OY, cx2, OY + sh, "#c0392b", 1.5, "6,4"))
             # Tick + label on top
             parts.append(_svg_line(cx2, OY - 16, cx2, OY, "#444"))
-            parts.append(_svg_text(cx2, OY - 18, f"{cut.position:.0f}",
-                                   font_size=fs - 2, fill="#555",
-                                   transform=f"rotate(-90,{cx2},{OY - 18})"))
-            # Number circle on bottom
-            cy2 = OY + sh + CIRCLE_R + 4
-            parts.append(_svg_circle(cx2, cy2, CIRCLE_R, "#c0392b"))
-            parts.append(_svg_text(cx2, cy2, str(cut.number),
-                                   font_size=max(6, CIRCLE_R - 2), fill="white"))
+
+    for marker in h_dim_markers:
+        parts.append(_svg_line(
+            marker.anchor_x - 16,
+            marker.anchor_y,
+            marker.label_x + 4,
+            marker.label_y,
+            "#444",
+            1,
+        ))
+        parts.append(_svg_text(marker.label_x, marker.label_y, f"{cut_values[marker.cut.number]:.0f}",
+                               font_size=fs - 2, anchor="end", fill="#555"))
+
+    for marker in v_dim_markers:
+        parts.append(_svg_line(
+            marker.anchor_x,
+            marker.anchor_y - 16,
+            marker.label_x,
+            marker.label_y + 4,
+            "#444",
+            1,
+        ))
+        parts.append(_svg_text(marker.label_x, marker.label_y, f"{cut_values[marker.cut.number]:.0f}",
+                               font_size=fs - 2, fill="#555"))
+
+    for marker in h_markers:
+        parts.append(_svg_line(
+            marker.anchor_x,
+            marker.anchor_y,
+            marker.label_x - CIRCLE_R - 2,
+            marker.label_y,
+            "#c0392b",
+            1,
+        ))
+        parts.append(_svg_circle(marker.label_x, marker.label_y, CIRCLE_R, "#c0392b"))
+        parts.append(_svg_text(marker.label_x, marker.label_y, str(marker.cut.number),
+                               font_size=max(6, CIRCLE_R - 2), fill="white"))
+
+    for marker in v_markers:
+        parts.append(_svg_line(
+            marker.anchor_x,
+            marker.anchor_y,
+            marker.label_x,
+            marker.label_y - CIRCLE_R - 2,
+            "#c0392b",
+            1,
+        ))
+        parts.append(_svg_circle(marker.label_x, marker.label_y, CIRCLE_R, "#c0392b"))
+        parts.append(_svg_text(marker.label_x, marker.label_y, str(marker.cut.number),
+                               font_size=max(6, CIRCLE_R - 2), fill="white"))
 
     parts.append("</svg>")
     return "\n".join(parts)
@@ -210,7 +282,7 @@ def export_svg(project: Project, folder: Path) -> None:
     safe = "".join(c if c.isalnum() or c in "-_ " else "_" for c in base).strip()
     if project.mode == "2d":
         for i, layout in enumerate(project.sheet_layouts):
-            svg = _sheet_to_svg(layout, unit)
+            svg = _sheet_to_svg(layout, unit, kerf=project.settings.kerf)
             (folder / f"{safe}_sheet_{i+1:02d}.svg").write_text(svg, encoding="utf-8")
     else:
         for i, layout in enumerate(project.bar_layouts):
@@ -335,8 +407,42 @@ def export_pdf(project: Project, path: Path) -> None:
         c.circle(ox, oy + sh * scale, 3 * mm, fill=1, stroke=0)
 
         # Cut lines
-        cuts = compute_cuts(layout)
-        CIRCLE_R = 4 * mm
+        cuts = compute_cuts(layout, kerf=project.settings.kerf)
+        cut_values = {cut.number: cut.position for cut in cuts}
+        H_CIRCLE_R = 2.8 * mm
+        V_CIRCLE_R = 2.4 * mm
+        h_pdf_cuts = [
+            CutLine(number=cut.number, orientation=cut.orientation, position=sy(cut.position))
+            for cut in cuts if cut.orientation == "H"
+        ]
+        v_pdf_cuts = [
+            CutLine(number=cut.number, orientation=cut.orientation, position=ox + cut.position * scale)
+            for cut in cuts if cut.orientation == "V"
+        ]
+        h_markers = place_horizontal_cut_markers(
+            h_pdf_cuts,
+            anchor_x=ox + sw * scale,
+            label_x=ox + sw * scale + H_CIRCLE_R + 2.5 * mm,
+            min_sep=H_CIRCLE_R * 2 + 1.2 * mm,
+        )
+        v_markers = place_vertical_cut_markers(
+            v_pdf_cuts,
+            anchor_y=oy,
+            label_y=oy - V_CIRCLE_R - 10 * mm,
+            min_sep=V_CIRCLE_R * 2 + 3.5 * mm,
+        )
+        h_dim_markers = place_horizontal_cut_markers(
+            h_pdf_cuts,
+            anchor_x=ox,
+            label_x=ox - 6.5 * mm,
+            min_sep=5 * mm,
+        )
+        v_dim_markers = place_vertical_cut_markers(
+            v_pdf_cuts,
+            anchor_y=oy + sh * scale,
+            label_y=oy + sh * scale + 7 * mm,
+            min_sep=7 * mm,
+        )
 
         for cut in cuts:
             c.setStrokeColor(HexColor("#c0392b"))
@@ -346,44 +452,68 @@ def export_pdf(project: Project, path: Path) -> None:
             if cut.orientation == "H":
                 pdf_y = sy(cut.position)
                 c.line(ox, pdf_y, ox + sw * scale, pdf_y)
-                c.setDash()   # reset dash
-                # Tick + label on left
                 c.setStrokeColorRGB(0.27, 0.27, 0.27)
                 c.setLineWidth(0.5)
                 c.line(ox - 5 * mm, pdf_y, ox, pdf_y)
-                c.setFillColorRGB(0.33, 0.33, 0.33)
-                c.setFont("Helvetica", 6)
-                c.drawRightString(ox - 5.5 * mm, pdf_y - 2, f"{cut.position:.0f}")
-                # Numbered circle on right
-                cx2 = ox + sw * scale + CIRCLE_R + 1 * mm
-                c.setFillColor(HexColor("#c0392b"))
-                c.circle(cx2, pdf_y, CIRCLE_R, fill=1, stroke=0)
-                c.setFillColorRGB(1, 1, 1)
-                c.setFont("Helvetica-Bold", 5)
-                c.drawCentredString(cx2, pdf_y - 1.5, str(cut.number))
             else:
                 pdf_x = ox + cut.position * scale
                 pdf_y0 = oy
                 pdf_y1 = oy + sh * scale
                 c.line(pdf_x, pdf_y0, pdf_x, pdf_y1)
-                c.setDash()
                 c.setStrokeColorRGB(0.27, 0.27, 0.27)
                 c.setLineWidth(0.5)
                 c.line(pdf_x, pdf_y1, pdf_x, pdf_y1 + 5 * mm)
-                c.setFillColorRGB(0.33, 0.33, 0.33)
-                c.setFont("Helvetica", 6)
-                c.saveState()
-                c.translate(pdf_x, pdf_y1 + 5.5 * mm)
-                c.rotate(90)
-                c.drawString(0, 0, f"{cut.position:.0f}")
-                c.restoreState()
-                # Numbered circle on top (above sheet)
-                cy2 = oy + sh * scale + CIRCLE_R * 2 + 2 * mm
-                c.setFillColor(HexColor("#c0392b"))
-                c.circle(pdf_x, cy2, CIRCLE_R, fill=1, stroke=0)
-                c.setFillColorRGB(1, 1, 1)
-                c.setFont("Helvetica-Bold", 5)
-                c.drawCentredString(pdf_x, cy2 - 1.5, str(cut.number))
+            c.setDash()
+
+        c.setStrokeColorRGB(0.33, 0.33, 0.33)
+        c.setFillColorRGB(0.33, 0.33, 0.33)
+        c.setLineWidth(0.5)
+        c.setFont("Helvetica", 6)
+        for marker in h_dim_markers:
+            c.line(
+                marker.anchor_x - 5 * mm,
+                marker.anchor_y,
+                marker.label_x + 1.2 * mm,
+                marker.label_y,
+            )
+            c.drawRightString(marker.label_x, marker.label_y - 2, f"{cut_values[marker.cut.number]:.0f}")
+
+        for marker in v_dim_markers:
+            c.line(
+                marker.anchor_x,
+                marker.anchor_y + 5 * mm,
+                marker.label_x,
+                marker.label_y - 1.5 * mm,
+            )
+            c.drawCentredString(marker.label_x, marker.label_y - 1.5, f"{cut_values[marker.cut.number]:.0f}")
+
+        c.setStrokeColor(HexColor("#c0392b"))
+        c.setLineWidth(0.6)
+        for marker in h_markers:
+            c.line(
+                marker.anchor_x,
+                marker.anchor_y,
+                marker.label_x - H_CIRCLE_R - 1.2,
+                marker.label_y,
+            )
+            c.setFillColor(HexColor("#c0392b"))
+            c.circle(marker.label_x, marker.label_y, H_CIRCLE_R, fill=1, stroke=0)
+            c.setFillColorRGB(1, 1, 1)
+            c.setFont("Helvetica-Bold", 4)
+            c.drawCentredString(marker.label_x, marker.label_y - 1.2, str(marker.cut.number))
+
+        for marker in v_markers:
+            c.line(
+                marker.anchor_x,
+                marker.anchor_y,
+                marker.label_x,
+                marker.label_y + V_CIRCLE_R + 1.2,
+            )
+            c.setFillColor(HexColor("#c0392b"))
+            c.circle(marker.label_x, marker.label_y, V_CIRCLE_R, fill=1, stroke=0)
+            c.setFillColorRGB(1, 1, 1)
+            c.setFont("Helvetica-Bold", 4)
+            c.drawCentredString(marker.label_x, marker.label_y - 1.1, str(marker.cut.number))
 
         c.setDash()
         c.showPage()

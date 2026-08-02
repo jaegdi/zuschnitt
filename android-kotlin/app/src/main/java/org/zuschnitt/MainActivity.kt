@@ -658,7 +658,17 @@ private fun parseLayoutsJson(json: org.json.JSONObject): List<SheetResult> {
                     )
                 }
             } else emptyList()
-            SheetResult(sheetW, sheetH, placed, efficiency)
+            val cuts = lm.optJSONArray("cuts")?.let { cutArr ->
+                (0 until cutArr.length()).map { ci ->
+                    val cm = cutArr.getJSONObject(ci)
+                    CutLineData(
+                        number = cm.getInt("number"),
+                        orientation = cm.getString("orientation"),
+                        position = cm.getDouble("position").toFloat(),
+                    )
+                }
+            } ?: emptyList()
+            SheetResult(sheetW, sheetH, placed, efficiency, cuts)
         }
     } catch (_: Exception) { emptyList() }
 }

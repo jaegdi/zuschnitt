@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections import Counter
+from dataclasses import dataclass
 
 from .models import (
     StockSheet, Piece2D, PlacedPiece2D, SheetLayout,
@@ -44,7 +45,7 @@ class _MaxRects:
         self._free: list[_Rect] = [_Rect(0, 0, width, height)]
         self.placements: list[PlacedPiece2D] = []
 
-    def insert(self, piece: Piece2D, allow_rotation: bool) -> bool:
+    def insert(self, piece: Piece2D, allow_rotation: bool, prefer_rotated: bool = False) -> bool:
         """Try to insert piece. Returns True if placed."""
         best_rect: _Rect | None = None
         best_rotated = False
@@ -52,7 +53,8 @@ class _MaxRects:
 
         candidates = [(piece.width, piece.height, False)]
         if allow_rotation and not piece.grain_locked and piece.can_rotate:
-            candidates.append((piece.height, piece.width, True))
+            rotated = (piece.height, piece.width, True)
+            candidates = [rotated, candidates[0]] if prefer_rotated else [candidates[0], rotated]
 
         for pw, ph, rotated in candidates:
             for free in self._free:
@@ -122,6 +124,48 @@ class _MaxRects:
 
 
 # ---------------------------------------------------------------------------
+# Pre-orientation heuristic
+# ---------------------------------------------------------------------------
+
+_SIDE_MATCH_MIN_TOL = 5.0
+_SIDE_MATCH_MAX_TOL = 15.0
+_SIDE_MATCH_RATIO = 0.02
+
+
+def _build_dimension_frequency(pieces: list[Piece2D]) -> Counter[float]:
+    """Count candidate side lengths, weighted by piece quantity."""
+    dim_freq: Counter[float] = Counter()
+    for piece in pieces:
+        dim_freq[piece.width] += piece.quantity
+        if piece.can_rotate and not piece.grain_locked and piece.width != piece.height:
+            dim_freq[piece.height] += piece.quantity
+    return dim_freq
+
+
+def _side_match_tolerance(side: float, kerf: float) -> float:
+    scaled = abs(side) * _SIDE_MATCH_RATIO
+    return max(kerf * 2, _SIDE_MATCH_MIN_TOL, min(scaled, _SIDE_MATCH_MAX_TOL))
+
+
+def _shared_side_score(side: float, dim_freq: Counter[float], kerf: float) -> int:
+    tol = _side_match_tolerance(side, kerf)
+    return sum(weight for dim, weight in dim_freq.items() if abs(dim - side) <= tol)
+
+
+def _preferred_rotation(piece: Piece2D, dim_freq: Counter[float], kerf: float) -> bool:
+    """Return True when the rotated orientation aligns better with shared sides."""
+    if not piece.can_rotate or piece.grain_locked or piece.width == piece.height:
+        return False
+    width_score = _shared_side_score(piece.width, dim_freq, kerf)
+    height_score = _shared_side_score(piece.height, dim_freq, kerf)
+    return height_score > width_score
+
+
+def _preferred_side(piece: Piece2D, prefer_rotated: bool) -> float:
+    return piece.height if prefer_rotated else piece.width
+
+
+# ---------------------------------------------------------------------------
 # Public optimizer function
 # ---------------------------------------------------------------------------
 
@@ -142,11 +186,33 @@ def optimize_2d(
     for sheet in sheets:
         stock_pool.extend([sheet] * sheet.quantity)
 
-    # Expand pieces by quantity, sort largest area first
+    dim_freq: Counter[float] | None = None
+    rotation_preference: dict[int, bool] = {}
+    if allow_rotation:
+        dim_freq = _build_dimension_frequency(pieces)
+        rotation_preference = {
+            id(piece): _preferred_rotation(piece, dim_freq, kerf)
+            for piece in pieces
+        }
+
+    # Expand pieces by quantity and keep pieces with common sides adjacent.
     piece_list: list[Piece2D] = []
     for piece in pieces:
         piece_list.extend([piece] * piece.quantity)
-    piece_list.sort(key=lambda p: p.area(), reverse=True)
+    if dim_freq is None:
+        piece_list.sort(key=lambda p: p.area(), reverse=True)
+    else:
+        piece_list.sort(
+            key=lambda p: (
+                -_shared_side_score(
+                    _preferred_side(p, rotation_preference.get(id(p), False)),
+                    dim_freq,
+                    kerf,
+                ),
+                -_preferred_side(p, rotation_preference.get(id(p), False)),
+                -p.area(),
+            )
+        )
 
     layouts: list[SheetLayout] = []
     remaining = list(piece_list)
@@ -157,7 +223,11 @@ def optimize_2d(
         packer = _MaxRects(stock.width, stock.height, kerf)
         still_remaining = []
         for piece in remaining:
-            placed = packer.insert(piece, allow_rotation)
+            placed = packer.insert(
+                piece,
+                allow_rotation,
+                prefer_rotated=rotation_preference.get(id(piece), False),
+            )
             if not placed:
                 still_remaining.append(piece)
         if packer.placements:

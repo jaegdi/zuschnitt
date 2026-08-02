@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.pdf.PdfDocument
@@ -13,6 +14,9 @@ import android.provider.MediaStore
 import java.io.File
 import java.io.FileOutputStream
 import java.io.OutputStream
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
 
 /** Result data passed from Python bridge for rendering. */
 data class PlacedRect(
@@ -22,33 +26,114 @@ data class PlacedRect(
     val color: Int,
 )
 
+data class CutLineData(
+    val number: Int,
+    val orientation: String,
+    val position: Float,
+)
+
 data class SheetResult(
     val sheetW: Float,
     val sheetH: Float,
     val placements: List<PlacedRect>,
     val efficiency: Float,
+    val cuts: List<CutLineData>,
 )
+
+private data class MarkerPlacement(
+    val cut: CutLineData,
+    val anchorX: Float,
+    val anchorY: Float,
+    val labelX: Float,
+    val labelY: Float,
+)
+
+private fun spreadPositions(desired: List<Float>, minSep: Float): List<Float> {
+    if (desired.isEmpty()) return emptyList()
+
+    val clusters = mutableListOf(mutableListOf(desired.first()))
+    for (pos in desired.drop(1)) {
+        if (pos - clusters.last().last() < minSep) {
+            clusters.last().add(pos)
+        } else {
+            clusters.add(mutableListOf(pos))
+        }
+    }
+
+    val placed = mutableListOf<Float>()
+    var prevEnd = Float.NEGATIVE_INFINITY
+    for (cluster in clusters) {
+        val count = cluster.size
+        val center = cluster.sum() / count
+        var start = center - (count - 1) * minSep / 2f
+        start = max(start, prevEnd + minSep)
+        repeat(count) { idx -> placed.add(start + idx * minSep) }
+        prevEnd = placed.last()
+    }
+    return placed
+}
+
+private fun placeHorizontalMarkers(
+    cuts: List<CutLineData>,
+    anchorX: Float,
+    labelX: Float,
+    minSep: Float,
+): List<MarkerPlacement> {
+    val horizontal = cuts.filter { it.orientation == "H" }.sortedBy { it.position }
+    val yPositions = spreadPositions(horizontal.map { it.position }, minSep)
+    return horizontal.zip(yPositions).map { (cut, labelY) ->
+        MarkerPlacement(cut, anchorX, cut.position, labelX, labelY)
+    }
+}
+
+private fun placeVerticalMarkers(
+    cuts: List<CutLineData>,
+    anchorY: Float,
+    labelY: Float,
+    minSep: Float,
+): List<MarkerPlacement> {
+    val vertical = cuts.filter { it.orientation == "V" }.sortedBy { it.position }
+    val xPositions = spreadPositions(vertical.map { it.position }, minSep)
+    return vertical.zip(xPositions).map { (cut, labelX) ->
+        MarkerPlacement(cut, cut.position, anchorY, labelX, labelY)
+    }
+}
+
+private fun baseName(projectName: String): String =
+    projectName.ifBlank { "cutting_plan" }
+
+private fun drawCenteredText(canvas: Canvas, text: String, x: Float, y: Float, paint: Paint) {
+    val bounds = Rect()
+    paint.getTextBounds(text, 0, text.length, bounds)
+    canvas.drawText(text, x - bounds.width() / 2f, y + bounds.height() / 2f, paint)
+}
 
 // ── PDF ───────────────────────────────────────────────────────────────────
 
 fun exportPdf(context: Context, layouts: List<SheetResult>, projectName: String): String {
     val doc = PdfDocument()
-    val scale = 0.3f  // mm → points (rough: 1 pt ≈ 0.353 mm → scale≈2.83, but let's fit to A4)
 
     layouts.forEachIndexed { idx, layout ->
-        // Fit sheet into A4 landscape (842 × 595 pts)
         val pageW = 842
         val pageH = 595
-        val sx = (pageW - 40) / layout.sheetW
-        val sy = (pageH - 80) / layout.sheetH
+        val marginLeft = 20f
+        val marginTop = 36f
+        val dimLeft = 40f
+        val dimTop = 34f
+        val dimRight = 40f
+        val dimBottom = 54f
+        val drawW = pageW - marginLeft * 2 - dimLeft - dimRight
+        val drawH = pageH - marginTop - 20f - dimTop - dimBottom
+        val sx = drawW / layout.sheetW
+        val sy = drawH / layout.sheetH
         val s = minOf(sx, sy)
 
         val pageInfo = PdfDocument.PageInfo.Builder(pageW, pageH, idx + 1).create()
         val page = doc.startPage(pageInfo)
         val c: Canvas = page.canvas
 
-        val marginLeft = 20f
-        val marginTop = 60f
+        val ox = marginLeft + dimLeft + (drawW - layout.sheetW * s) / 2f
+        val oy = marginTop + dimTop + (drawH - layout.sheetH * s) / 2f
 
         // Title
         val titlePaint = Paint().apply {
@@ -69,10 +154,10 @@ fun exportPdf(context: Context, layouts: List<SheetResult>, projectName: String)
             strokeWidth = 1.5f
         }
         c.drawRect(
-            marginLeft,
-            marginTop,
-            marginLeft + layout.sheetW * s,
-            marginTop + layout.sheetH * s,
+            ox,
+            oy,
+            ox + layout.sheetW * s,
+            oy + layout.sheetH * s,
             borderPaint
         )
 
@@ -89,8 +174,8 @@ fun exportPdf(context: Context, layouts: List<SheetResult>, projectName: String)
         }
 
         layout.placements.forEachIndexed { i, rect ->
-            val left = marginLeft + rect.x * s
-            val top = marginTop + rect.y * s
+            val left = ox + rect.x * s
+            val top = oy + rect.y * s
             val right = left + rect.w * s
             val bottom = top + rect.h * s
 
@@ -101,10 +186,104 @@ fun exportPdf(context: Context, layouts: List<SheetResult>, projectName: String)
             c.drawText("${rect.w.toInt()}×${rect.h.toInt()}", left + 3, top + 22, textPaint)
         }
 
+        val cutPaint = Paint().apply {
+            color = Color.parseColor("#c0392b")
+            style = Paint.Style.STROKE
+            strokeWidth = 1.2f
+            pathEffect = DashPathEffect(floatArrayOf(7f, 5f), 0f)
+        }
+        val helperPaint = Paint().apply {
+            color = Color.parseColor("#555555")
+            style = Paint.Style.STROKE
+            strokeWidth = 0.8f
+        }
+        val dimTextPaint = Paint().apply {
+            color = Color.parseColor("#555555")
+            textSize = 9f
+            textAlign = Paint.Align.CENTER
+        }
+        val cutCirclePaint = Paint().apply {
+            color = Color.parseColor("#c0392b")
+            style = Paint.Style.FILL
+        }
+        val cutTextPaint = Paint().apply {
+            color = Color.WHITE
+            textSize = 8f
+            textAlign = Paint.Align.CENTER
+            isFakeBoldText = true
+        }
+
+        val scaledCuts = layout.cuts.map {
+            CutLineData(
+                number = it.number,
+                orientation = it.orientation,
+                position = if (it.orientation == "H") oy + it.position * s else ox + it.position * s,
+            )
+        }
+        val horizontalCuts = scaledCuts.filter { it.orientation == "H" }
+        val verticalCuts = scaledCuts.filter { it.orientation == "V" }
+        val hDimMarkers = placeHorizontalMarkers(
+            horizontalCuts,
+            anchorX = ox,
+            labelX = ox - 22f,
+            minSep = 18f,
+        )
+        val vDimMarkers = placeVerticalMarkers(
+            verticalCuts,
+            anchorY = oy,
+            labelY = oy - 18f,
+            minSep = 20f,
+        )
+        val hCutMarkers = placeHorizontalMarkers(
+            horizontalCuts,
+            anchorX = ox + layout.sheetW * s,
+            labelX = ox + layout.sheetW * s + 22f,
+            minSep = 20f,
+        )
+        val vCutMarkers = placeVerticalMarkers(
+            verticalCuts,
+            anchorY = oy + layout.sheetH * s,
+            labelY = oy + layout.sheetH * s + 26f,
+            minSep = 24f,
+        )
+
+        for (cut in horizontalCuts) {
+            c.drawLine(ox, cut.position, ox + layout.sheetW * s, cut.position, cutPaint)
+            c.drawLine(ox - 10f, cut.position, ox, cut.position, helperPaint)
+        }
+        for (cut in verticalCuts) {
+            c.drawLine(cut.position, oy, cut.position, oy + layout.sheetH * s, cutPaint)
+            c.drawLine(cut.position, oy, cut.position, oy - 10f, helperPaint)
+        }
+
+        val originalCutValues = layout.cuts.associateBy({ it.number }, { it.position.roundToInt() })
+
+        for (marker in hDimMarkers) {
+            c.drawLine(marker.anchorX - 10f, marker.anchorY, marker.labelX + 4f, marker.labelY, helperPaint)
+            c.drawText(originalCutValues[marker.cut.number].toString(), marker.labelX, marker.labelY + 3f, dimTextPaint)
+        }
+        for (marker in vDimMarkers) {
+            c.drawLine(marker.anchorX, marker.anchorY - 10f, marker.labelX, marker.labelY + 4f, helperPaint)
+            c.drawText(originalCutValues[marker.cut.number].toString(), marker.labelX, marker.labelY - 3f, dimTextPaint)
+        }
+
+        val hCircleR = 9f
+        val vCircleR = 8f
+        for (marker in hCutMarkers) {
+            c.drawLine(marker.anchorX, marker.anchorY, marker.labelX - hCircleR - 3f, marker.labelY, helperPaint)
+            c.drawCircle(marker.labelX, marker.labelY, hCircleR, cutCirclePaint)
+            drawCenteredText(c, marker.cut.number.toString(), marker.labelX, marker.labelY, cutTextPaint)
+        }
+        for (marker in vCutMarkers) {
+            c.drawLine(marker.anchorX, marker.anchorY, marker.labelX, marker.labelY - vCircleR - 3f, helperPaint)
+            c.drawCircle(marker.labelX, marker.labelY, vCircleR, cutCirclePaint)
+            drawCenteredText(c, marker.cut.number.toString(), marker.labelX, marker.labelY, cutTextPaint)
+        }
+
         doc.finishPage(page)
     }
 
-    val fileName = "${projectName.ifBlank { "zuschnitt" }}-plan.pdf"
+    val fileName = "${baseName(projectName)}.pdf"
     return writeToDownloads(context, fileName, "application/pdf") { out ->
         doc.writeTo(out)
     }.also { doc.close() }
@@ -113,61 +292,102 @@ fun exportPdf(context: Context, layouts: List<SheetResult>, projectName: String)
 // ── SVG ───────────────────────────────────────────────────────────────────
 
 fun exportSvg(context: Context, layouts: List<SheetResult>, projectName: String): String {
-    val sb = StringBuilder()
-    val padding = 20
-    val labelHeight = 30
-    val gap = 20
+    val saved = mutableListOf<String>()
+    val base = baseName(projectName)
 
-    // Calculate total SVG height
-    val totalH = layouts.sumOf { (it.sheetH + labelHeight + gap).toDouble() }.toInt() + padding * 2
-    val maxW = (layouts.maxOfOrNull { it.sheetW } ?: 0f).toInt() + padding * 2
-
-    sb.appendLine("""<?xml version="1.0" encoding="UTF-8"?>""")
-    sb.appendLine("""<svg xmlns="http://www.w3.org/2000/svg" width="$maxW" height="$totalH">""")
-    sb.appendLine("""  <rect width="100%" height="100%" fill="white"/>""")
-
-    var offsetY = padding.toFloat()
     layouts.forEachIndexed { idx, layout ->
-        val x = padding.toFloat()
-
-        // Label
-        sb.appendLine(
-            """  <text x="$x" y="${offsetY + 16}" font-size="14" font-weight="bold" fill="black">""" +
-            """Sheet ${idx + 1} — ${layout.sheetW.toInt()}×${layout.sheetH.toInt()} mm""" +
-            """  (${"%.1f".format(layout.efficiency)}% used)</text>"""
+        val dim = 50f
+        val ox = dim
+        val oy = dim
+        val sw = layout.sheetW
+        val sh = layout.sheetH
+        val circleR = max(7f, min(sw, sh) / 55f)
+        val cuts = layout.cuts
+        val hDimMarkers = placeHorizontalMarkers(
+            cuts.filter { it.orientation == "H" },
+            anchorX = ox,
+            labelX = ox - 18f,
+            minSep = 18f,
         )
-        offsetY += labelHeight
-
-        // Sheet border
-        sb.appendLine(
-            """  <rect x="$x" y="$offsetY" width="${layout.sheetW}" height="${layout.sheetH}" """ +
-            """fill="none" stroke="black" stroke-width="2"/>"""
+        val vDimMarkers = placeVerticalMarkers(
+            cuts.filter { it.orientation == "V" },
+            anchorY = oy,
+            labelY = oy - 18f,
+            minSep = 18f,
         )
+        val hCutMarkers = placeHorizontalMarkers(
+            cuts.filter { it.orientation == "H" },
+            anchorX = ox + sw,
+            labelX = ox + sw + circleR + 18f,
+            minSep = circleR * 2 + 6f,
+        )
+        val vCutMarkers = placeVerticalMarkers(
+            cuts.filter { it.orientation == "V" },
+            anchorY = oy + sh,
+            labelY = oy + sh + circleR + 26f,
+            minSep = circleR * 2 + 6f,
+        )
+        val cutValues = cuts.associateBy({ it.number }, { it.position.roundToInt() })
 
-        // Pieces
-        layout.placements.forEachIndexed { i, rect ->
-            val px = x + rect.x
-            val py = offsetY + rect.y
+        val sb = StringBuilder()
+        sb.appendLine("""<?xml version="1.0" encoding="UTF-8"?>""")
+        sb.appendLine("""<svg xmlns="http://www.w3.org/2000/svg" width="${sw + 2 * dim}" height="${sh + 2 * dim}">""")
+        sb.appendLine("""  <rect x="$ox" y="$oy" width="$sw" height="$sh" fill="#f5f5f0" stroke="#333" stroke-width="2"/>""")
+
+        layout.placements.forEach { rect ->
+            val px = ox + rect.x
+            val py = oy + rect.y
             val hex = "#%06X".format(rect.color and 0xFFFFFF)
             sb.appendLine(
                 """  <rect x="$px" y="$py" width="${rect.w}" height="${rect.h}" """ +
-                """fill="$hex" fill-opacity="0.7" stroke="#444" stroke-width="0.5"/>"""
+                    """fill="$hex" fill-opacity="0.7" stroke="#444" stroke-width="1"/>"""
             )
             sb.appendLine(
-                """  <text x="${px + 4}" y="${py + 14}" font-size="10" fill="black">""" +
-                """${rect.label} ${rect.w.toInt()}×${rect.h.toInt()}</text>"""
+                """  <text x="${px + rect.w / 2}" y="${py + rect.h / 2}" font-size="10" text-anchor="middle" fill="black">""" +
+                    """${rect.label.ifBlank { "${rect.w.toInt()}×${rect.h.toInt()}" }}</text>"""
             )
         }
 
-        offsetY += layout.sheetH + gap
+        cuts.filter { it.orientation == "H" }.forEach { cut ->
+            val cy = oy + cut.position
+            sb.appendLine("""  <line x1="$ox" y1="$cy" x2="${ox + sw}" y2="$cy" stroke="#c0392b" stroke-width="1.5" stroke-dasharray="6,4"/>""")
+            sb.appendLine("""  <line x1="${ox - 16}" y1="$cy" x2="$ox" y2="$cy" stroke="#444" stroke-width="1"/>""")
+        }
+        cuts.filter { it.orientation == "V" }.forEach { cut ->
+            val cx = ox + cut.position
+            sb.appendLine("""  <line x1="$cx" y1="$oy" x2="$cx" y2="${oy + sh}" stroke="#c0392b" stroke-width="1.5" stroke-dasharray="6,4"/>""")
+            sb.appendLine("""  <line x1="$cx" y1="${oy - 16}" x2="$cx" y2="$oy" stroke="#444" stroke-width="1"/>""")
+        }
+
+        hDimMarkers.forEach { marker ->
+            sb.appendLine("""  <line x1="${marker.anchorX - 16}" y1="${marker.anchorY}" x2="${marker.labelX + 4}" y2="${marker.labelY}" stroke="#444" stroke-width="1"/>""")
+            sb.appendLine("""  <text x="${marker.labelX}" y="${marker.labelY}" font-size="8" text-anchor="end" dominant-baseline="middle" fill="#555">${cutValues[marker.cut.number]}</text>""")
+        }
+        vDimMarkers.forEach { marker ->
+            sb.appendLine("""  <line x1="${marker.anchorX}" y1="${marker.anchorY - 16}" x2="${marker.labelX}" y2="${marker.labelY + 4}" stroke="#444" stroke-width="1"/>""")
+            sb.appendLine("""  <text x="${marker.labelX}" y="${marker.labelY}" font-size="8" text-anchor="middle" dominant-baseline="middle" fill="#555">${cutValues[marker.cut.number]}</text>""")
+        }
+
+        hCutMarkers.forEach { marker ->
+            sb.appendLine("""  <line x1="${marker.anchorX}" y1="${marker.anchorY}" x2="${marker.labelX - circleR - 2}" y2="${marker.labelY}" stroke="#c0392b" stroke-width="1"/>""")
+            sb.appendLine("""  <circle cx="${marker.labelX}" cy="${marker.labelY}" r="$circleR" fill="#c0392b"/>""")
+            sb.appendLine("""  <text x="${marker.labelX}" y="${marker.labelY}" font-size="${max(6f, circleR - 2f)}" text-anchor="middle" dominant-baseline="middle" fill="white">${marker.cut.number}</text>""")
+        }
+        vCutMarkers.forEach { marker ->
+            sb.appendLine("""  <line x1="${marker.anchorX}" y1="${marker.anchorY}" x2="${marker.labelX}" y2="${marker.labelY - circleR - 2}" stroke="#c0392b" stroke-width="1"/>""")
+            sb.appendLine("""  <circle cx="${marker.labelX}" cy="${marker.labelY}" r="$circleR" fill="#c0392b"/>""")
+            sb.appendLine("""  <text x="${marker.labelX}" y="${marker.labelY}" font-size="${max(6f, circleR - 2f)}" text-anchor="middle" dominant-baseline="middle" fill="white">${marker.cut.number}</text>""")
+        }
+
+        sb.appendLine("</svg>")
+
+        val fileName = "${base}_sheet_${(idx + 1).toString().padStart(2, '0')}.svg"
+        saved += writeToDownloads(context, fileName, "image/svg+xml") { out ->
+            out.write(sb.toString().toByteArray())
+        }
     }
 
-    sb.appendLine("</svg>")
-
-    val fileName = "${projectName.ifBlank { "zuschnitt" }}-plan.svg"
-    return writeToDownloads(context, fileName, "image/svg+xml") { out ->
-        out.write(sb.toString().toByteArray())
-    }
+    return if (saved.isEmpty()) "No SVG exported." else "Saved ${saved.size} SVG file(s) to Downloads."
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────

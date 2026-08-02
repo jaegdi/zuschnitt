@@ -5,6 +5,7 @@ Bridge for calling the Zuschnitt optimizer from Kotlin/Android via Chaquopy.
 import json
 
 from zuschnitt.models import StockSheet, Piece2D
+from zuschnitt.cuts import compute_cuts
 from zuschnitt.optimizer_2d import optimize_2d
 
 
@@ -61,12 +62,21 @@ def optimize_simple_json(sheets_json: str, pieces_json: str, kerf: float = 3.0) 
             total_area = layout.stock.area()
             waste = total_area - used_area
             result["total_waste"] += waste
+            cuts = compute_cuts(layout, kerf=float(kerf))
             result["layouts"].append({
                 "sheet_width": layout.stock.width,
                 "sheet_height": layout.stock.height,
                 "pieces_count": len(layout.placements),
                 "waste": waste,
                 "efficiency": (used_area / total_area * 100) if total_area > 0 else 0.0,
+                "cuts": [
+                    {
+                        "number": cut.number,
+                        "orientation": cut.orientation,
+                        "position": cut.position,
+                    }
+                    for cut in cuts
+                ],
                 "placements": [
                     {
                         "x": p.x,
@@ -84,4 +94,3 @@ def optimize_simple_json(sheets_json: str, pieces_json: str, kerf: float = 3.0) 
     except Exception as e:
         return json.dumps({"success": False, "error": str(e),
                            "layouts_count": 0, "unplaced_count": 0, "layouts": []})
-

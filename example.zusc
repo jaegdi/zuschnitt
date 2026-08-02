@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "name": "Untitled",
+  "name": "example",
   "mode": "2d",
   "settings": {
     "kerf": 3.4,
@@ -41,8 +41,26 @@
       "quantity": 1,
       "label": "Rückwand",
       "can_rotate": false,
-      "grain_locked": false,
+      "grain_locked": true,
       "color": "#e15759"
+    },
+    {
+      "width": 150.0,
+      "height": 980.0,
+      "quantity": 1,
+      "label": "",
+      "can_rotate": false,
+      "grain_locked": false,
+      "color": "#76b7b2"
+    },
+    {
+      "width": 150.0,
+      "height": 230.0,
+      "quantity": 1,
+      "label": "",
+      "can_rotate": true,
+      "grain_locked": false,
+      "color": "#59a14f"
     }
   ],
   "bars": [],
