@@ -1,0 +1,66 @@
+name: Release Python Package
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (z. B. v0.1.2)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release-python:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build Python package
+        run: |
+          set -e
+          python -m pip install --upgrade pip
+          python -m pip install build
+          python -m build
+
+      - name: Resolve tag name
+        id: tag
+        run: |
+          set -e
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${{ github.event.release.tag_name }}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: List Python build artifacts
+        run: |
+          echo "Uploading Python package assets:"
+          ls -la dist
+
+      - name: Upload Python assets to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+          body: |
+            ## Python packages
+
+            Download the Python distribution artifacts for this release.
+
+            - Wheel (.whl): install with `pip install <file>.whl`
+            - Source archive (.tar.gz): for source-based installation or inspection

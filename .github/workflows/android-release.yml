@@ -62,9 +62,21 @@ jobs:
 
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Create GitHub release and upload APK
+      - name: List release assets
+        run: |
+          echo "Uploading APK assets:"
+          ls -la release-assets
+
+      - name: Create GitHub release and upload assets
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.prepare.outputs.tag }}
           files: release-assets/*.apk
           generate_release_notes: true
+          body: |
+            ## Android APK
+
+            Download the Android app APK for this release.
+
+            - APK: Android application package for installation on compatible devices
+            - Install instructions: use the APK file on your Android device or emulator
