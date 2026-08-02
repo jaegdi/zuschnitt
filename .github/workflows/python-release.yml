@@ -1,9 +1,11 @@
 name: Release Python Package
 
 on:
-  release:
+  workflow_run:
+    workflows:
+      - "Release Android APK"
     types:
-      - published
+      - completed
   workflow_dispatch:
     inputs:
       tag:
@@ -16,6 +18,7 @@ permissions:
 
 jobs:
   release-python:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -40,8 +43,10 @@ jobs:
           set -e
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
             TAG="${{ inputs.tag }}"
+          elif [ "${GITHUB_EVENT_NAME}" = "workflow_run" ]; then
+            TAG="${{ github.event.workflow_run.head_branch }}"
           else
-            TAG="${{ github.event.release.tag_name }}"
+            TAG="${GITHUB_REF_NAME}"
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
